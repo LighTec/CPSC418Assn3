@@ -4,7 +4,7 @@
 import hashlib
 import math
 import random
-
+import hashlib
 import sympy
 
 from encrypt_decrypt__SOLUTION import generate_iv, pad, unpad, xor
@@ -335,7 +335,12 @@ class RSA_key:
 
         assert type(message) in [int, bytes]
 
-        # delete this comment and insert your code here
+        m_int = union_to_int(message)
+
+        e = self.e
+        N = self.N
+
+        return pow(m_int, e, N)
 
     def decrypt( self, cypher: Union[int,bytes] ) -> Union[int,None]:
         """Decrypt a message via this RSA key.
@@ -355,10 +360,19 @@ class RSA_key:
         """
 
         assert type(cypher) in [int, bytes]
+
         if(self.d):
-            return None #TODO
+                
+            c_int = union_to_int(cypher)
+
+            d = self.d
+            N = self.N
+            
+            return pow(c_int, d, N)
+                
         else:
             return None
+
 
 def union_to_int(value: Union[bytes, int]) -> int:
     if type(value) == int:
@@ -534,6 +548,22 @@ def pseudoKMAC( key_hash:bytes, data:bytes, length:int, custom:bytes=b'' ) -> by
     A bytes object containing the digest.
     """
     assert length > 0
+
+    custom_padded = pad_to_136(custom)
+
+    len_b = union_to_bytes(length)
+    
+    new_data = custom_padded.join([pad_to_136(key_hash), data, len_b])
+
+    return hash(new_data, len_b)
+
+
+def hash(data:bytes, length:bytes) -> bytes:
+
+    h = hashlib.shake_256()
+    h.update(data)
+    
+    return h.digest(length)
 
 
 def interleave_data( plaintext:bytes, nonce:bytes, inner_tag:bytes ) -> bytes:
