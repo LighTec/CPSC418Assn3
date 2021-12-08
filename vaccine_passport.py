@@ -707,7 +707,7 @@ def encrypt_data( data:bytes, key_enc:bytes, key_mac:bytes ) -> bytes:
 
     return ciphertext
 
-
+# decrypt data encrypted by previous encrypt data function. it will return the unpadded data that was inputted into ^^ or None if it sucks :)
 def decrypt_data( cyphertext:bytes, key_enc:bytes, key_mac:bytes ) -> Optional[bytes]:
     """Decrypt the data encrypted by encrypt_data(). Also perform all necessary 
        validation.
@@ -726,7 +726,57 @@ def decrypt_data( cyphertext:bytes, key_enc:bytes, key_mac:bytes ) -> Optional[b
     assert len(key_enc) == 32
     assert len(key_mac) == 32
 
-    # delete this comment and insert your code here
+    # separate the mac from the ciphertext from the input to verify
+    cipher_mac = cyphertext[-32:]
+    ciphertext = cyphertext[:-32]
+
+    # get the custom bytes for HMAC
+    custom = bytes("OH SARS QR MAC", "UTF-8")
+    
+    # HMAC with the hash key, ciphertext, the length 32, and the aforementioned custom 
+    # use this to check against the mac from the input
+    new_mac = pseudoKMAC(key_mac, ciphertext, 32, custom)
+
+    # check the macs
+    if(cipher_mac == new_mac):
+
+        # separate the iv and encrypted data
+        iv = ciphertext[:16]
+        encrypted_data = ciphertext[16:]
+  
+        # encryption algorithm to use
+        decrypted_data = b''
+        cipher = AES.new(key_enc, AES.MODE_ECB)
+
+        # decryption in blocks of 16 bytes bc AES
+        for i in range(len(encrypted_data) // 16):
+                
+            # block index converted to bytes (16 bytes bc AES)
+            i_b = int_to_bytes(i, 16)
+
+            # section of data to decrypt        
+            data_i = encrypted_data[i*16:(i+1)*16]
+
+            # xor iv with block index and encrypt with AES
+            encrypted_iv_i = cipher.encrypt(xor(i_b, iv))
+
+            # xor encrypted data chunk with the encrypted iv/block index to undo the encryption
+            decrypted_data_i = (xor(data_i, encrypted_iv_i))
+
+            # add block to total decrypted data
+            decrypted_data = b''.join([decrypted_data, decrypted_data_i])
+
+        # unpad
+        data = unpad(decrypted_data)
+
+        # if it work return
+        if(data is not None):
+
+            return data
+
+    # if any of the verification didn't work return None
+    return None
+
 
 # uses gen_plaintext, encrypts with AES in ECB mode, uses RSA key sign
 def create_passport( given_name:str, surname:str, birthdate:date, vax_count:int, \
