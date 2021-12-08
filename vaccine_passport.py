@@ -821,10 +821,10 @@ def verify_passport( passport:bytes, key_enc:bytes, RSA_key:object, key_hash:Opt
     assert RSA_key.bytes == 160
 
     passport_data = passport[0:159]
-    passport_signature = passport_data[159:]
+    passport_signature = passport[159:]
 
     print("Length of Data: " + str(len(passport_data)))
-    print("Length of Signature" + str(len(passport_signature)))
+    print("Length of Signature: " + str(len(passport_signature)))
 
     print("Verifying passport...")
     # check the rsa key can decrypt key_enc to the passport
