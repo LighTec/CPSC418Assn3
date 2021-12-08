@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 # good news: you get all these functions for free from prior assignment solutions
+import hashlib
 import math
 import random
 
@@ -371,6 +372,17 @@ def union_to_bytes(value: Union[bytes, int]) -> bytes:
     else:
         return int_to_bytes(value, math.ceil(math.log2(value+1) / 8))
 
+def pad_to_136(input: bytes) -> bytes:
+    pad_len = 136 - (len(input) % 136)
+    if(pad_len == 136):
+        return input
+    else:
+        to_pad = bytearray(pad_len)
+        output = bytearray(input)
+        output.extend(to_pad)
+        return bytes(output)
+
+
 def encode_name( given_name:str, surname:str, target:int=92 ) -> bytes:
     """Compact a person's name into a bytes sequence. See the 
        assignment sheet for details.
@@ -411,7 +423,7 @@ def encode_name( given_name:str, surname:str, target:int=92 ) -> bytes:
     print("lastlen: " + str(lastlen))
     print("Space left: " + str(spaceLeft))
     if(spaceLeft != 0):
-        surnameIndex = firstlen + random.randrange(0,spaceLeft) + 1
+        surnameIndex = firstlen + random.randrange(0,spaceLeft+1) + 1
     else:
         surnameIndex = firstlen + 1
 
@@ -437,6 +449,7 @@ def encode_name( given_name:str, surname:str, target:int=92 ) -> bytes:
     else:
         print("Skipping second pad")
 
+    print("First 3 Letters at surname index: [" + str(output[surnameIndex : surnameIndex+3].decode("UTF-8")) + "]")
     print("Output: " + str(output))
     print("Output Length: " + str(len(bytes(output))))
 
@@ -465,6 +478,44 @@ def gen_plaintext( given_name:str, surname:str, birthdate:date, vax_count:int, \
     assert (len(given_name) > 0) or (len(surname) > 0)
     assert vax_count >= 0
 
+    output = bytearray()
+
+    epoch = date(2006,6,11)
+
+    delta_vax_date = last_vax_date - epoch
+    last_vax_weeks = delta_vax_date.days // 7
+
+    delta_birth_date = (birthdate - epoch).days
+
+    if(last_vax_weeks > 4095 | vax_count == 0):
+        last_vax_weeks = 4095
+
+    upper_vax_weeks = last_vax_weeks & 3840 # mask bits 9-12
+    lower_vax_weeks = last_vax_weeks & 255 # mask bits 1-8
+
+    if(vax_count > 15):
+        vax_count = 15
+
+    if(delta_birth_date > 65535):
+        delta_birth_date = 65535
+
+    upper_birth_date = (delta_birth_date & 65280) >> 8
+    lower_birth_date = delta_birth_date & 255
+
+    combo_byte = vax_count << 4
+    combo_byte = combo_byte + upper_vax_weeks
+
+    output.append(combo_byte)
+    output.append(lower_vax_weeks)
+    output.append(upper_birth_date)
+    output.append(lower_birth_date)
+
+    name = encode_name(given_name, surname)
+
+    output.extend(bytearray(name))
+
+    return bytes(output)
+
     # delete this comment and insert your code here
 
 def pseudoKMAC( key_hash:bytes, data:bytes, length:int, custom:bytes=b'' ) -> bytes:
@@ -483,8 +534,6 @@ def pseudoKMAC( key_hash:bytes, data:bytes, length:int, custom:bytes=b'' ) -> by
     A bytes object containing the digest.
     """
     assert length > 0
-
-
 
 
 def interleave_data( plaintext:bytes, nonce:bytes, inner_tag:bytes ) -> bytes:
