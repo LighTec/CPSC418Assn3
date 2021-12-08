@@ -223,25 +223,26 @@ class RSA_key:
 
         # manually do GCD again to populate the table for Bezout's back substitution
         bezout_table = [[0,1],[0,0]] # pre-populate first 2 columns
-        mod = phi_n
-        val = e
+        soln = e
+        mult = phi_n
+        rem = e
         iter = 2
         while True:
-            bezout_table.insert(iter, [mod // val, 0])
-            temp = mod
-            mod = val
-            val = temp % val
-            if(val == 1):
+            bezout_table.insert(iter, [soln // mult, 0])
+            temp = soln % mult
+            soln = mult
+            mult = rem
+            rem = temp
+            iter += 1
+            if(rem == 1):
                 break
-            else:
-                iter += 1
 
         #back substitution via bezout
         for x in range(2,iter):
             bezout_table[x][1] = (bezout_table[x][0] * bezout_table[x-1][1]) + bezout_table[x-2][1]
 
         #print("Bezout table: " + str(bezout_table))
-        d_raw = bezout_table[iter-1][1]
+        d_raw = bezout_table[iter][1]
         if((iter - 1) % 2 == 1):
             d = phi_n - d_raw
         else:
