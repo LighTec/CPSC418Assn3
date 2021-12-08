@@ -402,20 +402,24 @@ def encode_name( given_name:str, surname:str, target:int=92 ) -> bytes:
     assert (len(given_name) > 0) or (len(surname) > 0)
     assert (target > 1) and (target < 256)
 
-    firstlen = len(given_name)
-    lastlen = len(surname)
+    firstlen = len(bytes(given_name))
+    lastlen = len(bytes(surname))
     namelen = firstlen + lastlen
 
+    print("Given Name Type:" + str(type(given_name)))
+    print("Decode with UTF-8: " + given_name.de)
+    print("Input Given Name: " + given_name)
+    print("Input Surname: " + surname)
     print("target: " + str(target))
 
     # cut names if too long, add 1 for the surname index byte
     while (namelen + 1) > target:
         if firstlen > lastlen:
-            given_name = given_name[0:firstlen - 1]
-            firstlen = len(given_name)
+            given_name = given_name[:-1]
+            firstlen = len(bytes(given_name))
         else:
-            surname = surname[0:lastlen - 1]
-            lastlen = len(surname)
+            surname = surname[:-1]
+            lastlen = len(bytes(surname))
         namelen = firstlen + lastlen
 
     spaceLeft = target - (firstlen + lastlen + 1)
@@ -499,11 +503,18 @@ def gen_plaintext( given_name:str, surname:str, birthdate:date, vax_count:int, \
     if(delta_birth_date > 65535):
         delta_birth_date = 65535
 
+    print("Vax count: " + str(bin(vax_count)))
+    print("Vax weeks: " + str(bin(last_vax_weeks)))
+    print("Upper vax weeks:" + str(bin(upper_vax_weeks)))
+    print("Lower vax weeks:" + str(bin(lower_vax_weeks)))
+
     upper_birth_date = (delta_birth_date & 65280) >> 8
     lower_birth_date = delta_birth_date & 255
 
     combo_byte = vax_count << 4
     combo_byte = combo_byte + upper_vax_weeks
+
+    print("Combo byte:" + str(bin(combo_byte)))
 
     output.append(combo_byte)
     output.append(lower_vax_weeks)
