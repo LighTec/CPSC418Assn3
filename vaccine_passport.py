@@ -873,8 +873,8 @@ def verify_passport( passport:bytes, key_enc:bytes, RSA_key:object, key_hash:Opt
     passport_data = passport[0:159]
     passport_signature = passport[159:]
 
-    print("Length of Data: " + str(len(passport_data)))
-    print("Length of Signature: " + str(len(passport_signature)))
+    #print("Length of Data: " + str(len(passport_data)))
+    #print("Length of Signature: " + str(len(passport_signature)))
 
     print("Verifying passport...")
     # check the rsa key can decrypt key_enc to the passport
@@ -899,6 +899,11 @@ def verify_passport( passport:bytes, key_enc:bytes, RSA_key:object, key_hash:Opt
         nonce.extend(nonce_piece)
         plaintext.extend(plaintext_piece)
         tag.extend(tag_piece)
+
+    print("Plaintext: " + str(plaintext))
+    print("Nonce: " + str(nonce))
+    print("Tag: " + str(tag))
+    print("keyhash: " + str(key_hash))
 
     if(key_hash):
         print("Key hash given.")
