@@ -227,14 +227,15 @@ class RSA_key:
         mult = phi_n
         rem = e
         iter = 2
+        #print("Init Output: soln: " + str(soln) + ", mult: " + str(mult) + ", rem: " + str(rem))
         while True:
             bezout_table.insert(iter, [soln // mult, 0])
-            temp = soln % mult
             soln = mult
             mult = rem
-            rem = temp
+            rem = soln % mult
             iter += 1
-            if(rem == 1):
+            #print("Algo Output: soln: " + str(soln) + ", mult: " + str(mult) + ", rem: " + str(rem))
+            if(rem == 0):
                 break
 
         #back substitution via bezout
@@ -242,11 +243,13 @@ class RSA_key:
             bezout_table[x][1] = (bezout_table[x][0] * bezout_table[x-1][1]) + bezout_table[x-2][1]
 
         #print("Bezout table: " + str(bezout_table))
-        d_raw = bezout_table[iter][1]
+        d_raw = bezout_table[iter-1][1]
         if((iter - 1) % 2 == 1):
             d = phi_n - d_raw
         else:
             d = d_raw
+
+        #print(bezout_table)
 
         return [e,d]
 
@@ -416,21 +419,21 @@ def encode_name( given_name:str, surname:str, target:int=92 ) -> bytes:
 
     output = bytearray()
 
-    output.append(bytearray(int_to_bytes(surnameIndex, 1)))
+    output.extend(bytearray(int_to_bytes(surnameIndex, 1)))
 
-    output.append(bytearray(bytes(given_name, "UTF-8")))
+    output.extend(bytearray(bytes(given_name, "UTF-8")))
 
     if(surnameIndex > firstlen + 1):
         pad = bytearray(surnameIndex - (firstlen + 1))
-        output.append(pad)
+        output.extend(pad)
     else:
         print("Skipping first pad")
 
-    output.append(bytearray(bytes(surname, "UTF-8")))
+    output.extend(bytearray(bytes(surname, "UTF-8")))
 
     if(len(output) < target):
         pad = bytearray(target - len(output))
-        output.append(pad)
+        output.extend(pad)
     else:
         print("Skipping second pad")
 
