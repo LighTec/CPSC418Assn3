@@ -339,9 +339,11 @@ class RSA_key:
 
         m_int = union_to_int(message)
 
+        # get the public key
         e = self.e
         N = self.N
 
+        # modular exponentiation
         return pow(m_int, e, N)
 
     def decrypt( self, cypher: Union[int,bytes] ) -> Union[int,None]:
@@ -363,18 +365,22 @@ class RSA_key:
 
         assert type(cypher) in [int, bytes]
 
+        # check that the private key exists
         if(self.d):
                 
             c_int = union_to_int(cypher)
 
+            # get the private key d and the modulus
             d = self.d
             N = self.N
             
+            #modular exponentiation.
             return pow(c_int, d, N)
                 
         else:
             return None
 
+# some helper functions
 
 def union_to_int(value: Union[bytes, int]) -> int:
     if type(value) == int:
@@ -388,6 +394,7 @@ def union_to_bytes(value: Union[bytes, int]) -> bytes:
     else:
         return int_to_bytes(value, math.ceil(math.log2(value+1) / 8))
 
+# this the P() function for the H() function
 def pad_to_136(input: bytes) -> bytes:
     pad_len = 136 - (len(input) % 136)
     if(pad_len == 136):
@@ -566,8 +573,8 @@ def gen_plaintext( given_name:str, surname:str, birthdate:date, vax_count:int, \
 
     return bytes(output)
 
-    # delete this comment and insert your code here
 
+# this is the H() function
 def pseudoKMAC( key_hash:bytes, data:bytes, length:int, custom:bytes=b'' ) -> bytes:
     """Returns the output of the modified KMAC algorithm. See the assignment
        sheet for details.
@@ -585,15 +592,22 @@ def pseudoKMAC( key_hash:bytes, data:bytes, length:int, custom:bytes=b'' ) -> by
     """
     assert length > 0
 
+    # P() on the key
+    key_hash_padded = pad_to_136(key_hash)
+
+    # P() on the custom text (if it was empty it will still be b'')
     custom_padded = pad_to_136(custom)
 
+    # encode the length
     len_b = int_to_bytes(length, 1)
     
-    new_data = b''.join([custom_padded, pad_to_136(key_hash), data, len_b])
+    # join the modified custom, key, plaintext data, length values that will be hashed
+    new_data = b''.join([custom_padded, key_hash_padded, data, len_b])
 
+    # hash the data and send the legth so the digest is the right size
     return hash(new_data, length)
 
-
+# this is shake 256. it is separate from KMAC because some functions want to just hash and add the key and encoded length at the end
 def hash(data:bytes, length:int) -> bytes:
 
     h = hashlib.shake_256()
@@ -634,6 +648,7 @@ def interleave_data( plaintext:bytes, nonce:bytes, inner_tag:bytes ) -> bytes:
 
     return bytes(output)
 
+# modified assignment 1 encryption algorithm
 def encrypt_data( data:bytes, key_enc:bytes, key_mac:bytes ) -> bytes:
     """Encrypt the given plaintext, following a modified version of the 
        algorithm from A1. See the assignment sheet for the changes.
@@ -651,33 +666,43 @@ def encrypt_data( data:bytes, key_enc:bytes, key_mac:bytes ) -> bytes:
     assert len(key_enc) == 32
     assert len(key_mac) == 32
 
+    # iv
     iv = generate_iv(16)
-
+    # pad
     padded_data = pad(data, 16)
 
-    # encrypt
-
+    # encryption algorithm to use
     encrypted_data = b''
     cipher = AES.new(key_enc, AES.MODE_ECB)
 
-    for i in range(len(data) // 16):
+    # encryption in blocks of 16 bytes bc AES
+    for i in range(len(padded_data) // 16):
             
+        # block index converted to bytes (16 bytes bc AES)
         i_b = int_to_bytes(i, 16)
-        
+
+        # section of data to encrypt        
         data_i = padded_data[i*16:(i+1)*16]
 
+        # xor iv with block index and encrypt with AES
         encrypted_iv_i = cipher.encrypt(xor(i_b, iv))
 
+        # xor plaintext data chunk with the encrypted iv/block index
         encrypted_data_i = (xor(data_i, encrypted_iv_i))
 
+        # add block to total encrypted data
         encrypted_data = b''.join([encrypted_data, encrypted_data_i])
 
+    # put the iv on the front
     iv_enc_data = b''.join([iv, encrypted_data])
 
+    # get the custom bytes for HMAC
     custom = bytes("OH SARS QR MAC", "UTF-8")
 
+    # HMAC with the hash key, iv||encrpted data, the length 32, and the aforementioned custom
     mac = pseudoKMAC(key_mac, iv_enc_data, 32, custom)
 
+    # put the mac on the end and return
     ciphertext = b''.join([iv_enc_data, mac])
 
     return ciphertext
@@ -703,6 +728,7 @@ def decrypt_data( cyphertext:bytes, key_enc:bytes, key_mac:bytes ) -> Optional[b
 
     # delete this comment and insert your code here
 
+# uses gen_plaintext, encrypts with AES in ECB mode, uses RSA key sign
 def create_passport( given_name:str, surname:str, birthdate:date, vax_count:int, \
         last_vax_date:date, key_hash:bytes, key_enc:bytes, RSA_key:RSA_key ) -> bytes:
     """Create a vaccine passport, using the above functions. This includes signing
@@ -726,26 +752,29 @@ def create_passport( given_name:str, surname:str, birthdate:date, vax_count:int,
     assert (len(given_name) > 0) or (len(surname) > 0)
     assert vax_count >= 0
     assert RSA_key.bytes == 160
-    
-    # delete this comment and insert your code here
 
-    #--------------------AAAAAAAAAAAAAAAAAAAAAAAAAAAAA (needs editing)
-
+    # given client data make the plaintext bytes
     plaintext = gen_plaintext(given_name, surname, birthdate, vax_count, last_vax_date)
+    # make the random nonce
     nonce = token_bytes(16)
 
+    # make the inner tag using the nonce and plaintext, use KMAC with the hash key and new custom data and length 16
     data_1 = b''.join([nonce, plaintext])
-    custom = bytes( "OH SARS SECOND VERIFY", "UTF-8")
+    custom = bytes("OH SARS SECOND VERIFY", "UTF-8")
     tag = pseudoKMAC(key_hash, data_1, 16, custom)
 
+    # make the mac by just hashing (not KMAC) nonce||plaintext||(inner)tag
     to_hash = b''.join([nonce, plaintext, tag])
     mac = hash(to_hash, 31)
 
+    # interleave the plaintext, nonce, tag so that there are 8 sections of 16 bytes each with little bits of each input value
     data_2 = interleave_data(plaintext, nonce, tag)
 
+    # encryption algorithm to use
     ciphertext = b''
     cipher = AES.new(key_enc, AES.MODE_ECB)
 
+    # take each of the 8 chunks of 16 bytes and encrypt with AES in ECB
     for i in range(8):
 
         data_i = data_2[i*16:(i+1)*16]
@@ -754,22 +783,24 @@ def create_passport( given_name:str, surname:str, birthdate:date, vax_count:int,
 
         ciphertext = b''.join([ciphertext, encrypted_data_i])
 
+    # take the encrypted chunks of data and put the (outer tag) mac on it
     ciphertext_mac = b''.join([ciphertext, mac])
 
+    # sign it
     signature = RSA_key.sign(ciphertext_mac)
 
+    # if it worked (bc sometimes sign returns None)
     if(signature is not None):
-        
+        # then convert to bytes
         signature_b = int_to_bytes(signature, RSA_key.bytes)
 
+        # then put the signature on the end and return
         passport = b''.join([ciphertext_mac, signature_b])
 
         return passport
 
+    # if it didn't work just return empty bytes ig??
     return b''
-
-    #-------------------AAAAAAAAAAAAAAAAAA
-
 
 
 def verify_passport( passport:bytes, key_enc:bytes, RSA_key:object, key_hash:Optional[bytes]=None \
