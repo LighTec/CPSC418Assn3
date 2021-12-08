@@ -422,47 +422,42 @@ def encode_name( given_name:str, surname:str, target:int=92 ) -> bytes:
     lastlen = len(bytes(surname, "UTF-8"))
     namelen = firstlen + lastlen
 
-    print("Input Given Name: " + given_name)
-    print("Input Surname: " + surname)
-    print("target: " + str(target))
+    #print("Input Given Name: " + given_name)
+    #print("Input Surname: " + surname)
+    #print("target: " + str(target))
 
     # cut names if too long, add 1 for the surname index byte
     while (namelen + 1) > target:
-        print("################")
-        print("firstlen: " + str(firstlen))
-        print("lastlen: " + str(lastlen))
-        cut_firstlen = len(bytes(given_name[:-1], "UTF-8"))
-        cut_lastlen = len(bytes(surname[:-1], "UTF-8"))
+        #print("################")
+        #print("firstlen: " + str(len(given_name)))
+        #print("lastlen: " + str(len(surname)))
+        #cut_firstlen = len(bytes(given_name[:-1], "UTF-8"))
+        #cut_lastlen = len(bytes(surname[:-1], "UTF-8"))
 
-        print("cut firstname len: " + str(cut_firstlen))
-        print("cut lastname len: " + str(cut_lastlen))
+        #print("cut firstname len: " + str(cut_firstlen))
+        #print("cut lastname len: " + str(cut_lastlen))
 
-        # detect if one of the two options will fit better
-        #if(cut_firstlen < lastlen):
-        #    print("Edge case: choosing first name to cut..")
-        #    surname = surname[:-1]
-        #    firstlen = len(bytes(surname, "UTF-8"))
-        if(cut_firstlen > cut_lastlen):
+        if(len(given_name) > len(surname)):
             given_name = given_name[:-1]
-            print("Cutting firstname")
+            #print("Cutting firstname")
             firstlen = len(bytes(given_name, "UTF-8"))
         else:
             surname = surname[:-1]
-            print("Cutting lastname")
+            #print("Cutting lastname")
             lastlen = len(bytes(surname, "UTF-8"))
         namelen = firstlen + lastlen
 
     spaceLeft = target - (firstlen + lastlen + 1)
-    print("END RESULT OF CUT:")
-    print("firstlen: " + str(firstlen))
-    print("lastlen: " + str(lastlen))
-    print("Space left: " + str(spaceLeft))
+    #print("END RESULT OF CUT:")
+    #print("firstlen: " + str(firstlen))
+    #print("lastlen: " + str(lastlen))
+    #print("Space left: " + str(spaceLeft))
     if(spaceLeft != 0):
         surnameIndex = firstlen + random.randrange(0,spaceLeft+1)
     else:
         surnameIndex = firstlen
 
-    print("Surname Index: " + str(surnameIndex))
+    #print("Surname Index: " + str(surnameIndex))
 
     output = bytearray()
 
@@ -472,22 +467,22 @@ def encode_name( given_name:str, surname:str, target:int=92 ) -> bytes:
 
     if(surnameIndex > firstlen):
         pad = bytearray(surnameIndex - firstlen)
-        print("First pad length: " + str(surnameIndex - firstlen))
+        #print("First pad length: " + str(surnameIndex - firstlen))
         output.extend(pad)
-    else:
-        print("Skipping first pad")
+    #else:
+        #print("Skipping first pad")
 
     output.extend(bytearray(bytes(surname, "UTF-8")))
 
     if(len(output) < target):
         pad = bytearray(target - len(output))
-        print("Second pad length: " + str(target - len(output)))
+        #print("Second pad length: " + str(target - len(output)))
         output.extend(pad)
-    else:
-        print("Skipping second pad")
+    #else:
+        #print("Skipping second pad")
 
-    print("Output: " + str(output))
-    print("Output Length: " + str(len(bytes(output))))
+    #print("Output: " + str(output))
+    #print("Output Length: " + str(len(bytes(output))))
 
     return bytes(output)
 
@@ -794,9 +789,8 @@ def verify_passport( passport:bytes, key_enc:bytes, RSA_key:object, key_hash:Opt
     assert len(passport) == 319
     assert RSA_key.bytes == 160
 
-    passport_data = passport[0:160]
-    passport_signature = passport_data[160:]
-
+    passport_data = passport[0:159]
+    passport_signature = passport_data[159:]
 
     print("Verifying passport...")
     # check the rsa key can decrypt key_enc to the passport
