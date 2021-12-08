@@ -6,6 +6,7 @@ import math
 import random
 import hashlib
 import sympy
+from Crypto.Cipher import AES
 
 from encrypt_decrypt__SOLUTION import generate_iv, pad, unpad, xor
 from basic_auth__SOLUTION import b2i, blake2b_256, bytes_to_int, calc_A, calc_B, calc_K_client
@@ -551,14 +552,14 @@ def pseudoKMAC( key_hash:bytes, data:bytes, length:int, custom:bytes=b'' ) -> by
 
     custom_padded = pad_to_136(custom)
 
-    len_b = union_to_bytes(length)
+    len_b = int_to_bytes(length, 1)
     
-    new_data = custom_padded.join([pad_to_136(key_hash), data, len_b])
+    new_data = b''.join([custom_padded, pad_to_136(key_hash), data, len_b])
 
-    return hash(new_data, len_b)
+    return hash(new_data, length)
 
 
-def hash(data:bytes, length:bytes) -> bytes:
+def hash(data:bytes, length:int) -> bytes:
 
     h = hashlib.shake_256()
     h.update(data)
@@ -598,13 +599,13 @@ def interleave_data( plaintext:bytes, nonce:bytes, inner_tag:bytes ) -> bytes:
 
     return bytes(output)
 
-def encrypt_data( plaintext:bytes, key_enc:bytes, key_mac:bytes ) -> bytes:
+def encrypt_data( data:bytes, key_enc:bytes, key_mac:bytes ) -> bytes:
     """Encrypt the given plaintext, following a modified version of the 
        algorithm from A1. See the assignment sheet for the changes.
 
     PARAMETERS
     ==========
-    plaintext: The message to encrypt, as bytes.
+    data: The message to encrypt, as bytes.
     key_enc: The key used to encrypt with, also as bytes.
     Key_mac: The key used to generate THE MAC.
 
@@ -615,7 +616,37 @@ def encrypt_data( plaintext:bytes, key_enc:bytes, key_mac:bytes ) -> bytes:
     assert len(key_enc) == 32
     assert len(key_mac) == 32
 
-    # delete this comment and insert your code here
+    iv = generate_iv(16)
+
+    padded_data = pad(data, 16)
+
+    # encrypt
+
+    encrypted_data = b''
+    cipher = AES.new(key_enc, AES.MODE_ECB)
+
+    for i in range(len(data) // 16):
+            
+        i_b = int_to_bytes(i, 16)
+        
+        data_i = padded_data[i*16:(i+1)*16]
+
+        encrypted_iv_i = cipher.encrypt(xor(i_b, iv))
+
+        encrypted_data_i = (xor(data_i, encrypted_iv_i))
+
+        encrypted_data = b''.join([encrypted_data, encrypted_data_i])
+
+    iv_enc_data = b''.join([iv, encrypted_data])
+
+    custom = bytes("OH SARS QR MAC", "UTF-8")
+
+    mac = pseudoKMAC(key_mac, iv_enc_data, 32, custom)
+
+    ciphertext = b''.join([iv_enc_data, mac])
+
+    return ciphertext
+
 
 def decrypt_data( cyphertext:bytes, key_enc:bytes, key_mac:bytes ) -> Optional[bytes]:
     """Decrypt the data encrypted by encrypt_data(). Also perform all necessary 
@@ -638,7 +669,7 @@ def decrypt_data( cyphertext:bytes, key_enc:bytes, key_mac:bytes ) -> Optional[b
     # delete this comment and insert your code here
 
 def create_passport( given_name:str, surname:str, birthdate:date, vax_count:int, \
-        last_vax_date:date, key_hash:bytes, key_enc:bytes, RSA_key:object ) -> bytes:
+        last_vax_date:date, key_hash:bytes, key_enc:bytes, RSA_key:RSA_key ) -> bytes:
     """Create a vaccine passport, using the above functions. This includes signing
        the output.
 
@@ -662,6 +693,49 @@ def create_passport( given_name:str, surname:str, birthdate:date, vax_count:int,
     assert RSA_key.bytes == 160
     
     # delete this comment and insert your code here
+
+    #--------------------AAAAAAAAAAAAAAAAAAAAAAAAAAAAA (needs editing)
+
+    plaintext = gen_plaintext(given_name, surname, birthdate, vax_count, last_vax_date)
+    nonce = token_bytes(16)
+
+    data_1 = b''.join([nonce, plaintext])
+    custom = bytes( "OH SARS SECOND VERIFY", "UTF-8")
+    tag = pseudoKMAC(key_hash, data_1, 16, custom)
+
+    to_hash = b''.join([nonce, plaintext, tag])
+    mac = hash(to_hash, 31)
+
+    data_2 = interleave_data(plaintext, nonce, tag)
+
+    ciphertext = b''
+    cipher = AES.new(key_enc, AES.MODE_ECB)
+
+    for i in range(8):
+
+        data_i = data_2[i*16:(i+1)*16]
+
+        encrypted_data_i = cipher.encrypt(data_i)
+
+        ciphertext = b''.join([ciphertext, encrypted_data_i])
+
+    ciphertext_mac = b''.join([ciphertext, mac])
+
+    signature = RSA_key.sign(ciphertext_mac)
+
+    if(signature is not None):
+        
+        signature_b = int_to_bytes(signature, RSA_key.bytes)
+
+        passport = b''.join([ciphertext_mac, signature_b])
+
+        return passport
+
+    return b''
+
+    #-------------------AAAAAAAAAAAAAAAAAA
+
+
 
 def verify_passport( passport:bytes, key_enc:bytes, RSA_key:object, key_hash:Optional[bytes]=None \
         ) -> Optional[tuple[str,str,date,int,int]]:
