@@ -309,7 +309,8 @@ class RSA_key:
         if(self.e):
             int_signature = union_to_int(signature)
             int_message = union_to_int(message)
-            if(pow(int_signature,self.e,self.N) == int_message):
+            int_calculated_signature = pow(int_signature,self.e,self.N)
+            if(int_calculated_signature == int_message):
                 return True
             else:
                 return False
@@ -416,34 +417,49 @@ def encode_name( given_name:str, surname:str, target:int=92 ) -> bytes:
     assert (len(given_name) > 0) or (len(surname) > 0)
     assert (target > 1) and (target < 256)
 
-    firstlen = len(bytes(given_name))
-    lastlen = len(bytes(surname))
+    firstlen = len(bytes(given_name, "UTF-8"))
+    lastlen = len(bytes(surname, "UTF-8"))
     namelen = firstlen + lastlen
 
-    print("Given Name Type:" + str(type(given_name)))
-    print("Decode with UTF-8: " + given_name.de)
     print("Input Given Name: " + given_name)
     print("Input Surname: " + surname)
     print("target: " + str(target))
 
     # cut names if too long, add 1 for the surname index byte
     while (namelen + 1) > target:
-        if firstlen > lastlen:
+        print("################")
+        print("firstlen: " + str(firstlen))
+        print("lastlen: " + str(lastlen))
+        cut_firstlen = len(bytes(given_name[:-1], "UTF-8"))
+        cut_lastlen = len(bytes(surname[:-1], "UTF-8"))
+
+        print("cut firstname len: " + str(cut_firstlen))
+        print("cut lastname len: " + str(cut_lastlen))
+
+        # detect if one of the two options will fit better
+        #if(cut_firstlen < lastlen):
+        #    print("Edge case: choosing first name to cut..")
+        #    surname = surname[:-1]
+        #    firstlen = len(bytes(surname, "UTF-8"))
+        if(cut_firstlen > cut_lastlen):
             given_name = given_name[:-1]
-            firstlen = len(bytes(given_name))
+            print("Cutting firstname")
+            firstlen = len(bytes(given_name, "UTF-8"))
         else:
             surname = surname[:-1]
-            lastlen = len(bytes(surname))
+            print("Cutting lastname")
+            lastlen = len(bytes(surname, "UTF-8"))
         namelen = firstlen + lastlen
 
     spaceLeft = target - (firstlen + lastlen + 1)
+    print("END RESULT OF CUT:")
     print("firstlen: " + str(firstlen))
     print("lastlen: " + str(lastlen))
     print("Space left: " + str(spaceLeft))
     if(spaceLeft != 0):
-        surnameIndex = firstlen + random.randrange(0,spaceLeft+1) + 1
+        surnameIndex = firstlen + random.randrange(0,spaceLeft+1)
     else:
-        surnameIndex = firstlen + 1
+        surnameIndex = firstlen
 
     print("Surname Index: " + str(surnameIndex))
 
@@ -453,8 +469,9 @@ def encode_name( given_name:str, surname:str, target:int=92 ) -> bytes:
 
     output.extend(bytearray(bytes(given_name, "UTF-8")))
 
-    if(surnameIndex > firstlen + 1):
-        pad = bytearray(surnameIndex - (firstlen + 1))
+    if(surnameIndex > firstlen):
+        pad = bytearray(surnameIndex - firstlen)
+        print("First pad length: " + str(surnameIndex - firstlen))
         output.extend(pad)
     else:
         print("Skipping first pad")
@@ -463,11 +480,11 @@ def encode_name( given_name:str, surname:str, target:int=92 ) -> bytes:
 
     if(len(output) < target):
         pad = bytearray(target - len(output))
+        print("Second pad length: " + str(target - len(output)))
         output.extend(pad)
     else:
         print("Skipping second pad")
 
-    print("First 3 Letters at surname index: [" + str(output[surnameIndex : surnameIndex+3].decode("UTF-8")) + "]")
     print("Output: " + str(output))
     print("Output Length: " + str(len(bytes(output))))
 
@@ -498,37 +515,44 @@ def gen_plaintext( given_name:str, surname:str, birthdate:date, vax_count:int, \
 
     output = bytearray()
 
-    epoch = date(2006,6,11)
+    epoch_vax = date(2006,6,11)
+    epoch_birth = date(1880,1,1)
 
-    delta_vax_date = last_vax_date - epoch
+    delta_vax_date = last_vax_date - epoch_vax
     last_vax_weeks = delta_vax_date.days // 7
 
-    delta_birth_date = (birthdate - epoch).days
+    delta_birth_date = (birthdate - epoch_birth).days
 
-    if(last_vax_weeks > 4095 | vax_count == 0):
+    if((last_vax_weeks > 4095) | (vax_count == 0)):
         last_vax_weeks = 4095
+
+    if (vax_count > 15):
+        vax_count = 15
+
+    if (delta_birth_date > 65535):
+        delta_birth_date = 65535
 
     upper_vax_weeks = last_vax_weeks & 3840 # mask bits 9-12
     lower_vax_weeks = last_vax_weeks & 255 # mask bits 1-8
 
-    if(vax_count > 15):
-        vax_count = 15
 
-    if(delta_birth_date > 65535):
-        delta_birth_date = 65535
 
-    print("Vax count: " + str(bin(vax_count)))
-    print("Vax weeks: " + str(bin(last_vax_weeks)))
-    print("Upper vax weeks:" + str(bin(upper_vax_weeks)))
-    print("Lower vax weeks:" + str(bin(lower_vax_weeks)))
+    #print("Vax count: " + str(bin(vax_count)))
+    #print("Vax weeks: " + str(bin(last_vax_weeks)) + "    int: " + str(last_vax_weeks))
+    #print("Upper vax weeks:" + str(bin(upper_vax_weeks)))
+    #print("Lower vax weeks:" + str(bin(lower_vax_weeks)))
 
     upper_birth_date = (delta_birth_date & 65280) >> 8
     lower_birth_date = delta_birth_date & 255
 
-    combo_byte = vax_count << 4
-    combo_byte = combo_byte + upper_vax_weeks
+    #print("Delta birth date: " + str(delta_birth_date))
+    #print("Upper birth date: " + str(bin(upper_birth_date)))
+    #print("Lower birth date: " + str(bin(lower_birth_date)))
 
-    print("Combo byte:" + str(bin(combo_byte)))
+    combo_byte = vax_count << 4
+    combo_byte = combo_byte + (upper_vax_weeks >> 8)
+
+    #print("Combo byte:" + str(bin(combo_byte)))
 
     output.append(combo_byte)
     output.append(lower_vax_weeks)
@@ -696,7 +720,83 @@ def verify_passport( passport:bytes, key_enc:bytes, RSA_key:object, key_hash:Opt
     assert len(passport) == 319
     assert RSA_key.bytes == 160
 
-    # delete this comment and insert your code here
+    passport_data = passport[0:160]
+    passport_signature = passport_data[160:]
+
+
+    print("Verifying passport...")
+    # check the rsa key can decrypt key_enc to the passport
+    verified = RSA_key.verify(passport_data, passport_signature)
+    if(not verified):
+        print("Passport verified as incorrect!")
+        return None
+    else:
+        print("Passport verified as correct...")
+
+    # un-interleave data
+    plaintext = bytearray()
+    nonce = bytearray()
+    tag = bytearray()
+
+    for x in range(8):
+        block = passport_data[x * 16: (x + 1) * 16]
+        nonce_piece = block[0:2]
+        plaintext_piece = block[2:14]
+        tag_piece = block[14:16]
+
+        nonce.extend(nonce_piece)
+        plaintext.extend(plaintext_piece)
+        tag.extend(tag_piece)
+
+    if(key_hash):
+        print("Key hash given.")
+        if(key_hash != tag):
+            print("Key hash doesn't match!")
+            return None
+        else:
+            print("Key hash matches...")
+
+    # split data from plaintext & return
+    vax_count = plaintext[0] & 240 >> 4
+
+    upper_vax_weeks = plaintext[0] & 15 << 8
+    lower_vax_weeks = plaintext[1]
+    vax_weeks = lower_vax_weeks + upper_vax_weeks
+
+    birth_days = bytes_to_int(bytes(plaintext[2:4]))
+
+    epoch_birth = date(1880,1,1)
+    birthdate = epoch_birth + timedelta(days=birth_days)
+
+    surname_index = plaintext[4]
+
+    name_data = plaintext[5:] # the rest of it
+
+    # search for zero bytes between given name and surname
+    first_zeropad = name_data.find(0,0,surname_index)
+
+    if(first_zeropad == -1):
+        given_end = surname_index - 1
+    else:
+        given_end = first_zeropad
+
+    given_name = name_data[1:given_end]
+
+    second_zeropad = name_data.find(0,surname_index)
+
+    if(second_zeropad == -1):
+        surname = name_data[-surname_index:]
+    else:
+        surname = name_data[surname_index:second_zeropad]
+
+    output = [str(given_name), str(surname), birthdate, vax_count, vax_weeks]
+
+    print("Returning data: " + str(output))
+
+    return output
+
+
+
 
 def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
         DH_params:object, RSA_key:object, health_id:int, birthdate:date, \
