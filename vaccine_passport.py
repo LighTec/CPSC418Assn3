@@ -40,7 +40,7 @@ from datetime import date, timedelta
 from math import gcd
 import re
 
-from secrets import randbelow, token_bytes
+from secrets import randbelow, token_bytes, randbits
 import socket
 from sys import exit
 
@@ -969,7 +969,7 @@ def verify_passport( passport:bytes, key_enc:bytes, RSA_key:RSA_key, key_hash:Op
 
 
 def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
-        DH_params:object, RSA_key:object, health_id:int, birthdate:date, \
+        DH_params:object, RSA_key:RSA_key, health_id:int, birthdate:date, \
         vax_date:date ) -> Optional[tuple[int,int,bytes]]:
     """Request a passport from the web client. Carries out the modified version of
        the protocol outlined in the assignment sheet. Assume the registration process
@@ -1004,11 +1004,18 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
     g = DH_params.g
     N = DH_params.N
 
+    base_bytes = 64
+    base_bits  = base_bytes << 3 # same as multiplying by 8
+    hash_bytes = 32
+    hash_bits  = hash_bytes << 3
+    salt_bytes = 16
+    salt_bits  = salt_bytes << 3
+
     varprint( N, 'N' )
     varprint( g, 'g' )
-    varprint( username, 'username' )
-    varprint( pw, 'pw' )
-    varprint( s, 's' )
+    varprint( uuid, 'username' )
+    varprint( secret, 'pw' )
+    varprint( salt, 's' )
 
     # connect to the server
     sock = create_socket( ip, port )
@@ -1021,7 +1028,7 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
         return close_sock( sock )
 
     # retrieve N and g
-    expected = base_bytes * 2
+    expected = base_bits * 2
     g_N = receive( sock, expected )
     if len(g_N) != expected:
         return close_sock( sock )
@@ -1041,7 +1048,7 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
     varprint( k, 'k' )
 
     # calculate x and v
-    x = calc_x( s, secret )
+    x = calc_x( salt, secret )
     v = calc_A( g, N, x )   # same action as A!
 
     varprint( x, 'x' )
@@ -1074,7 +1081,7 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
         return close_sock( sock )
     varprint( s_B, None )
 
-    if s != s_B[:salt_bytes]:
+    if salt != s_B[:salt_bytes]:
         return close_sock( sock )
 
     B = bytes_to_int( s_B[salt_bytes:] )
@@ -1135,7 +1142,36 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
     client_data.extend(bytearray(4)) # zero bytes
     client_data.extend(int_to_bytes(last_vax_days, 2))
 
-    client_data_enc = encrypt_data(client_data, K_client[0:32], K_client[32:])
+    # -----------------------encryption under construstion
+
+    # making (Nrsa||e)
+    n_b = union_to_bytes(RSA_key.N)
+    e_b = union_to_bytes(RSA_key.e)
+    key_rsa = b''.join([n_b, e_b])
+
+    # the custom bytes for this step
+    custom = bytes("OH SARS KEYEXTEND 1", "UTF-8")
+
+    # key
+    key_aes = pseudoKMAC(key_rsa, K_client, 32, custom)
+
+    # pad
+    padded_data = pad(client_data, 16)
+
+    # encryption algorithm to use
+    client_data_enc = b''
+    cipher = AES.new(key_aes, AES.MODE_ECB)
+
+    # encrypt with AES in ECB
+    for i in range(len(padded_data) // 16):
+
+        data_i = padded_data[i*16:(i+1)*16]
+
+        encrypted_data_i = cipher.encrypt(data_i)
+
+        client_data_enc = b''.join([client_data_enc, encrypted_data_i])
+
+    # -----------------------construction ends
 
 
     # receive QR code
@@ -1186,6 +1222,13 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
     assert len(registered) > 0
     assert len(vax_database) > 0
 
+    base_bytes = 64
+    base_bits  = base_bytes << 3 # same as multiplying by 8
+    hash_bytes = 32
+    hash_bits  = hash_bytes << 3
+    salt_bytes = 16
+    salt_bits  = salt_bytes << 3
+
     g = DH_params.g
     N = DH_params.N
 
@@ -1231,8 +1274,8 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
     g, N = map(b2i, [g, N])
 
     # retrieve s, v, if possible
-    if username in database:
-        s, v = database[username]
+    if username in registered:
+        s, v = registered[username]
     else:
         return close_sock(sock)
 
