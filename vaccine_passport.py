@@ -842,14 +842,14 @@ def verify_passport( passport:bytes, key_enc:bytes, RSA_key:RSA_key, key_hash:Op
     #print("Length of Data: " + str(len(passport_data)))
     #print("Length of Signature: " + str(len(passport_signature)))
 
-    print("Verifying passport...")
+    #print("Verifying passport...")
     # check the rsa key can decrypt key_enc to the passport
     verified = RSA_key.verify(passport_data, passport_signature)
     if(not verified):
-        print("Passport verified as incorrect!")
+        #print("Passport verified as incorrect!")
         return None
-    else:
-        print("Passport verified as correct...")
+    #else:
+        #print("Passport verified as correct...")
 
     
     # take the (outer tag) mac off of the passport_data
@@ -886,10 +886,10 @@ def verify_passport( passport:bytes, key_enc:bytes, RSA_key:RSA_key, key_hash:Op
         plaintext.extend(plaintext_piece)
         tag.extend(tag_piece)
 
-    print("Plaintext: " + str(plaintext))
-    print("Nonce: " + str(nonce))
-    print("Tag: " + str(tag))
-    print("keyhash: " + str(key_hash))
+    #print("Plaintext: " + str(plaintext))
+    #print("Nonce: " + str(nonce))
+    #print("Tag: " + str(tag))
+    #print("keyhash: " + str(key_hash))
 
     # make new mac by just hashing (not KMAC) nonce||plaintext||(inner)tag
     to_hash = b''.join([nonce, plaintext, tag])
@@ -897,33 +897,33 @@ def verify_passport( passport:bytes, key_enc:bytes, RSA_key:RSA_key, key_hash:Op
 
     # compare mac from input with new mac
     if(new_mac != ciphertext_mac):
-        print("ciphertext mac not equal to calculated mac!")
+        #print("ciphertext mac not equal to calculated mac!")
         return None
-    else:
-        print("macs agree...")
+    #else:
+        #print("macs agree...")
 
     if(key_hash):
-        print("Key hash given.")
+        #print("Key hash given.")
         data_1 = b''.join([nonce, plaintext])
         custom = bytes("OH SARS SECOND VERIFY", "UTF-8")
         new_tag = pseudoKMAC(key_hash, data_1, 16, custom)
-        print("New tag: " + str(new_tag))
+        #print("New tag: " + str(new_tag))
         if(new_tag != tag):
-            print("Tags don't match!")
+            #print("Tags don't match!")
             return None
-        else:
-            print("Tags match...")
+        #else:
+            #print("Tags match...")
 
     # split data from plaintext & return
     vax_count = (plaintext[0] & 240) >> 4
 
     upper_vax_weeks = (plaintext[0] & 15) << 8
     lower_vax_weeks = plaintext[1]
-    print("plaintext[0]: " + str(plaintext[0]))
-    print("plaintext[1]: " + str(plaintext[1]))
+    #print("plaintext[0]: " + str(plaintext[0]))
+    #print("plaintext[1]: " + str(plaintext[1]))
     vax_weeks = lower_vax_weeks + upper_vax_weeks
     
-    print("vax weeks: " + str(vax_weeks))
+    #print("vax weeks: " + str(vax_weeks))
 
     if(vax_weeks == 4095):
         weeks_since_vax = vax_weeks
@@ -932,7 +932,7 @@ def verify_passport( passport:bytes, key_enc:bytes, RSA_key:RSA_key, key_hash:Op
 
         weeks_since_vax = weeks_since_vax_origin - vax_weeks
 
-    print("Adjusted vax weeks: " + str(weeks_since_vax))
+    #print("Adjusted vax weeks: " + str(weeks_since_vax))
 
     birth_days = bytes_to_int(bytes(plaintext[2:4]))
 
@@ -946,7 +946,7 @@ def verify_passport( passport:bytes, key_enc:bytes, RSA_key:RSA_key, key_hash:Op
     first_zeropad = name_data.find(0,0,surname_index)
 
     if(first_zeropad == -1):
-        given_end = surname_index - 1
+        given_end = surname_index
     else:
         given_end = first_zeropad
 
@@ -961,7 +961,7 @@ def verify_passport( passport:bytes, key_enc:bytes, RSA_key:RSA_key, key_hash:Op
 
     output = (str(given_name, "UTF-8"), str(surname, "UTF-8"), birthdate, vax_count, weeks_since_vax)
 
-    print("Returning data: " + str(output))
+    #print("Returning data: " + str(output))
 
     return output
 
