@@ -848,7 +848,7 @@ def create_passport( given_name:str, surname:str, birthdate:date, vax_count:int,
     return b''
 
 
-def verify_passport( passport:bytes, key_enc:bytes, RSA_key:object, key_hash:Optional[bytes]=None \
+def verify_passport( passport:bytes, key_enc:bytes, RSA_key:RSA_key, key_hash:Optional[bytes]=None \
         ) -> Optional[tuple[str,str,date,int,int]]:
     """Verify the given passport to make sure it appears legit. Do all the checks that you can,
        given the parameters.
@@ -885,13 +885,33 @@ def verify_passport( passport:bytes, key_enc:bytes, RSA_key:object, key_hash:Opt
     else:
         print("Passport verified as correct...")
 
+    
+    # take the (outer tag) mac off of the passport_data
+    ciphertext_mac = passport_data[-31:]
+    encrypted_data = passport_data[:-31]
+
+    # decrypt passport_data
+    decrypted_data = b''
+
+    # encryption algorithm to use
+    cipher = AES.new(key_enc, AES.MODE_ECB)
+
+    # take each of the 8 chunks of 16 bytes and decrypt with AES in ECB
+    for i in range(8):
+
+        data_i = encrypted_data[i*16:(i+1)*16]
+
+        decrypted_data_i = cipher.decrypt(data_i)
+
+        decrypted_data = b''.join([decrypted_data, decrypted_data_i])
+
     # un-interleave data
     plaintext = bytearray()
     nonce = bytearray()
     tag = bytearray()
 
     for x in range(8):
-        block = passport_data[x * 16: (x + 1) * 16]
+        block = decrypted_data[x * 16: (x + 1) * 16]
         nonce_piece = block[0:2]
         plaintext_piece = block[2:14]
         tag_piece = block[14:16]
@@ -905,20 +925,39 @@ def verify_passport( passport:bytes, key_enc:bytes, RSA_key:object, key_hash:Opt
     print("Tag: " + str(tag))
     print("keyhash: " + str(key_hash))
 
+    # make new mac by just hashing (not KMAC) nonce||plaintext||(inner)tag
+    to_hash = b''.join([nonce, plaintext, tag])
+    new_mac = hash(to_hash, 31)
+
+    # compare mac from input with new mac
+    if(new_mac != ciphertext_mac):
+        print("ciphertext mac not equal to calculated mac!")
+        return None
+    else:
+        print("macs agree...")
+
     if(key_hash):
         print("Key hash given.")
-        if(key_hash != tag):
-            print("Key hash doesn't match!")
+        data_1 = b''.join([nonce, plaintext])
+        custom = bytes("OH SARS SECOND VERIFY", "UTF-8")
+        new_tag = pseudoKMAC(key_hash, data_1, 16, custom)
+        print("New tag: " + str(new_tag))
+        if(new_tag != tag):
+            print("Tags don't match!")
             return None
         else:
-            print("Key hash matches...")
+            print("Tags match...")
 
     # split data from plaintext & return
-    vax_count = plaintext[0] & 240 >> 4
+    vax_count = (plaintext[0] & 240) >> 4
 
-    upper_vax_weeks = plaintext[0] & 15 << 8
+    upper_vax_weeks = (plaintext[0] & 15) << 8
     lower_vax_weeks = plaintext[1]
+    print("plaintext[0]: " + str(plaintext[0]))
+    print("plaintext[1]: " + str(plaintext[1]))
     vax_weeks = lower_vax_weeks + upper_vax_weeks
+    
+    print("vax weeks: " + str(vax_weeks))
 
     birth_days = bytes_to_int(bytes(plaintext[2:4]))
 
@@ -937,7 +976,7 @@ def verify_passport( passport:bytes, key_enc:bytes, RSA_key:object, key_hash:Opt
     else:
         given_end = first_zeropad
 
-    given_name = name_data[1:given_end]
+    given_name = name_data[:given_end]
 
     second_zeropad = name_data.find(0,surname_index)
 
@@ -946,7 +985,7 @@ def verify_passport( passport:bytes, key_enc:bytes, RSA_key:object, key_hash:Opt
     else:
         surname = name_data[surname_index:second_zeropad]
 
-    output = [str(given_name), str(surname), birthdate, vax_count, vax_weeks]
+    output = (str(given_name, "UTF-8"), str(surname, "UTF-8"), birthdate, vax_count, vax_weeks)
 
     print("Returning data: " + str(output))
 
