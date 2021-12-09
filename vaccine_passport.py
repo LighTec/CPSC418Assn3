@@ -1172,8 +1172,6 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
         client_data_enc = b''.join([client_data_enc, encrypted_data_i])
 
     # -----------------------construction ends
-
-
     # receive QR code
     qr_len = 319
     qrcode = receive(sock, qr_len)
@@ -1229,8 +1227,7 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
     salt_bytes = 16
     salt_bits  = salt_bytes << 3
 
-    g = DH_params.g
-    N = DH_params.N
+    g, N = map(lambda x: i2b(x, base_bytes), [DH_params.g, DH_params.N])
 
     varprint(N, 'N', "Server")
     varprint(g, 'g', "Server")
@@ -1239,7 +1236,7 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
     varprint(k, 'k', "Server")
 
     # send g and N
-    data = g + N
+    data = union_to_bytes(g) + union_to_bytes(N)
     count = send(sock, data)
     if count != len(data):
         return close_sock(sock)
@@ -1340,8 +1337,6 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
     if len(client_data_enc) != client_data_len:
         return close_sock(sock)
 
-    ## DECRYPT client_data_enc HERE -> client_data
-
     # making (Nrsa||e)
     n_b = union_to_bytes(RSA_key.N)
     e_b = union_to_bytes(RSA_key.e)
@@ -1369,27 +1364,56 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
     # unpad
     client_data = unpad(decrypted_data, 16)
 
-    # -------- end decrypt
+    OHN = bytes_to_int(client_data[0:5])
 
-    OHN = 0
+    OHN_data = vax_database[OHN]
+
+    if(not OHN_data):
+        return close_sock(sock)
+
+    given_name = OHN_data[0]
+    surname = OHN_data[1]
+    birth_date = OHN_data[2]
+
+    latest_vax = None
+    vax_count = 0
+    if(len(OHN_data) > 3):
+        vax_data = OHN_data[3:]
+
+        # find newest vax record
+
+        for vax in vax_data:
+            vax_count += 1
+            if not latest_vax:
+                latest_vax = vax
+            else:
+                if [2]:
+                    if vax[2] > latest_vax:
+                        latest_vax = vax
+
+    passport = gen_plaintext(given_name, surname, birth_date, vax_count, latest_vax)
+
+    signature = RSA_key.sign(plaintext)
+
+    qr_data_arr = bytearray()
+    qr_data_arr.extend(passport)
+    qr_data_arr.extend(passport)
+
+    qr_data = bytes(qr_data)
+
     passport = bytes()
     qr_data = bytes()
-
-    ## ENCRYPT qr_data HERE -> qr_data_enc
     
     qr_data_enc = encrypt_data(qr_data, K_server[0:32], K_server[32:])
-
-
-    qr_data_enc = bytes()
 
     count = send(sock, qr_data_enc)
     if count != len(qr_data_enc):
         return close_sock(sock)
     else:
         print("Server: Protocol successful.")
+        close_sock(sock)
         return (b, K_server, OHN, passport)
     ### END
-
 
 ##### MAIN
 
