@@ -48,6 +48,8 @@ from threading import Thread
 from time import sleep
 from typing import Callable, Iterator, Mapping, Optional, Union
 
+epoch_vax = date(2006, 6, 11)
+epoch_birth = date(1880, 1, 1)
 
 # bad news: all their external imports aren't imported into this namespace, 
 #  so you'll need to reimport. Do so here.
@@ -429,42 +431,26 @@ def encode_name( given_name:str, surname:str, target:int=92 ) -> bytes:
     lastlen = len(bytes(surname, "UTF-8"))
     namelen = firstlen + lastlen
 
-    #print("Input Given Name: " + given_name)
-    #print("Input Surname: " + surname)
-    #print("target: " + str(target))
-
     # cut names if too long, add 1 for the surname index byte
     while (namelen + 1) > target:
-        #print("################")
-        #print("firstlen: " + str(len(given_name)))
-        #print("lastlen: " + str(len(surname)))
-        #cut_firstlen = len(bytes(given_name[:-1], "UTF-8"))
-        #cut_lastlen = len(bytes(surname[:-1], "UTF-8"))
 
-        #print("cut firstname len: " + str(cut_firstlen))
-        #print("cut lastname len: " + str(cut_lastlen))
-
+        # cut down whichever name is longer (tie goes to surname)
         if(len(given_name) > len(surname)):
             given_name = given_name[:-1]
-            #print("Cutting firstname")
             firstlen = len(bytes(given_name, "UTF-8"))
         else:
             surname = surname[:-1]
-            #print("Cutting lastname")
             lastlen = len(bytes(surname, "UTF-8"))
         namelen = firstlen + lastlen
 
+    # calculate empty space to pad & surname index
     spaceLeft = target - (firstlen + lastlen + 1)
-    #print("END RESULT OF CUT:")
-    #print("firstlen: " + str(firstlen))
-    #print("lastlen: " + str(lastlen))
-    #print("Space left: " + str(spaceLeft))
     if(spaceLeft != 0):
         surnameIndex = firstlen + random.randrange(0,spaceLeft+1)
     else:
         surnameIndex = firstlen
 
-    #print("Surname Index: " + str(surnameIndex))
+    # fill output array with (surname_index)||(given_name)||(first zero pad)||(surname)||(second zero pad)
 
     output = bytearray()
 
@@ -474,22 +460,13 @@ def encode_name( given_name:str, surname:str, target:int=92 ) -> bytes:
 
     if(surnameIndex > firstlen):
         pad = bytearray(surnameIndex - firstlen)
-        #print("First pad length: " + str(surnameIndex - firstlen))
         output.extend(pad)
-    #else:
-        #print("Skipping first pad")
 
     output.extend(bytearray(bytes(surname, "UTF-8")))
 
     if(len(output) < target):
         pad = bytearray(target - len(output))
-        #print("Second pad length: " + str(target - len(output)))
         output.extend(pad)
-    #else:
-        #print("Skipping second pad")
-
-    #print("Output: " + str(output))
-    #print("Output Length: " + str(len(bytes(output))))
 
     return bytes(output)
 
@@ -518,9 +495,7 @@ def gen_plaintext( given_name:str, surname:str, birthdate:date, vax_count:int, \
 
     output = bytearray()
 
-    epoch_vax = date(2006,6,11)
-    epoch_birth = date(1880,1,1)
-
+    # calculate weeks since vaccination and birthdate with epoch
     delta_vax_date = last_vax_date - epoch_vax
     last_vax_weeks = delta_vax_date.days // 7
 
@@ -535,33 +510,24 @@ def gen_plaintext( given_name:str, surname:str, birthdate:date, vax_count:int, \
     if (delta_birth_date > 65535):
         delta_birth_date = 65535
 
+    # calculate the half byte for the weeks since vax
     upper_vax_weeks = last_vax_weeks & 3840 # mask bits 9-12
     lower_vax_weeks = last_vax_weeks & 255 # mask bits 1-8
 
-
-
-    #print("Vax count: " + str(bin(vax_count)))
-    #print("Vax weeks: " + str(bin(last_vax_weeks)) + "    int: " + str(last_vax_weeks))
-    #print("Upper vax weeks:" + str(bin(upper_vax_weeks)))
-    #print("Lower vax weeks:" + str(bin(lower_vax_weeks)))
-
-    upper_birth_date = (delta_birth_date & 65280) >> 8 # I forgot int_to_bytes exist, but leaving it in anyways
+    # I forgot int_to_bytes exist for a bit, but leaving it in anyways
+    upper_birth_date = (delta_birth_date & 65280) >> 8
     lower_birth_date = delta_birth_date & 255
-
-    #print("Delta birth date: " + str(delta_birth_date))
-    #print("Upper birth date: " + str(bin(upper_birth_date)))
-    #print("Lower birth date: " + str(bin(lower_birth_date)))
 
     combo_byte = vax_count << 4
     combo_byte = combo_byte + (upper_vax_weeks >> 8)
 
-    #print("Combo byte:" + str(bin(combo_byte)))
-
+    # append the birthdate, last vax date, and vax count data
     output.append(combo_byte)
     output.append(lower_vax_weeks)
     output.append(upper_birth_date)
     output.append(lower_birth_date)
 
+    # append name data
     name = encode_name(given_name, surname)
 
     output.extend(bytearray(name))
@@ -959,9 +925,17 @@ def verify_passport( passport:bytes, key_enc:bytes, RSA_key:RSA_key, key_hash:Op
     
     print("vax weeks: " + str(vax_weeks))
 
+    if(vax_weeks == 4095):
+        weeks_since_vax = vax_weeks
+    else:
+        weeks_since_vax_origin = ((date.today()) - epoch_vax).days // 7
+
+        weeks_since_vax = weeks_since_vax_origin - vax_weeks
+
+    print("Adjusted vax weeks: " + str(weeks_since_vax))
+
     birth_days = bytes_to_int(bytes(plaintext[2:4]))
 
-    epoch_birth = date(1880,1,1)
     birthdate = epoch_birth + timedelta(days=birth_days)
 
     surname_index = plaintext[4]
@@ -985,7 +959,7 @@ def verify_passport( passport:bytes, key_enc:bytes, RSA_key:RSA_key, key_hash:Op
     else:
         surname = name_data[surname_index:second_zeropad]
 
-    output = (str(given_name, "UTF-8"), str(surname, "UTF-8"), birthdate, vax_count, vax_weeks)
+    output = (str(given_name, "UTF-8"), str(surname, "UTF-8"), birthdate, vax_count, weeks_since_vax)
 
     print("Returning data: " + str(output))
 
@@ -1177,7 +1151,7 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
         return (a, K_client, passport)  # both are ints
     else:
         print("Client: Passport not valid.")
-        return (a, K_client, passport)  # both are ints
+        return None
     ### END
 
 def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
@@ -1212,11 +1186,11 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
     assert len(registered) > 0
     assert len(vax_database) > 0
 
-    varprint(N, 'N', "Server")
-    varprint(g, 'g', "Server")
-
     g = DH_params.g
     N = DH_params.N
+
+    varprint(N, 'N', "Server")
+    varprint(g, 'g', "Server")
 
     k = calc_u(g, N)  # same thing as u!
     varprint(k, 'k', "Server")
@@ -1312,12 +1286,34 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
 
     # send M1. Defer error checking until after the socket's closed
     count = send(sock, M1)
+
     close_sock(sock)
     if count != len(M1):
-        return None
+        return close_sock(sock)
+
+    client_data_len = 48
+
+    client_data_enc = sock.recv(sock, client_data_len)
+    if len(client_data_enc) != client_data_len:
+        return close_sock(sock)
+
+    ## DECRYPT client_data_enc HERE -> client_data
+
+    OHN = 0
+    passport = bytes()
+    qr_data = bytes()
+
+    ## ENCRYPT qr_data HERE -> qr_data_enc
+
+
+    qr_data_enc = bytes()
+
+    count = send(sock, qr_data_enc)
+    if count != len(qr_data_enc):
+        return close_sock(sock)
     else:
         print("Server: Protocol successful.")
-        return (username, b, K_server)
+        return (b, K_server, OHN, passport)
     ### END
 
 
