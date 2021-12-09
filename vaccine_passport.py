@@ -1342,11 +1342,42 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
 
     ## DECRYPT client_data_enc HERE -> client_data
 
+    # making (Nrsa||e)
+    n_b = union_to_bytes(RSA_key.N)
+    e_b = union_to_bytes(RSA_key.e)
+    key_rsa = b''.join([n_b, e_b])
+
+    # the custom bytes for this step
+    custom = bytes("OH SARS KEYEXTEND 1", "UTF-8")
+
+    # key
+    key_aes = pseudoKMAC(key_rsa, K_server, 32, custom)
+
+    # encryption algorithm to use
+    decrypted_data = b''
+    cipher = AES.new(key_aes, AES.MODE_ECB)
+
+    # encrypt with AES in ECB
+    for i in range(len(client_data_enc) // 16):
+
+        data_i = client_data_enc[i*16:(i+1)*16]
+
+        decrypted_data_i = cipher.decrypt(data_i)
+
+        decrypted_data = b''.join([decrypted_data, decrypted_data_i])
+    
+    # unpad
+    client_data = unpad(decrypted_data, 16)
+
+    # -------- end decrypt
+
     OHN = 0
     passport = bytes()
     qr_data = bytes()
 
     ## ENCRYPT qr_data HERE -> qr_data_enc
+    
+    qr_data_enc = encrypt_data(qr_data, K_server[0:32], K_server[32:])
 
 
     qr_data_enc = bytes()
