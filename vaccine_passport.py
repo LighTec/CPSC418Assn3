@@ -545,7 +545,7 @@ def gen_plaintext( given_name:str, surname:str, birthdate:date, vax_count:int, \
     #print("Upper vax weeks:" + str(bin(upper_vax_weeks)))
     #print("Lower vax weeks:" + str(bin(lower_vax_weeks)))
 
-    upper_birth_date = (delta_birth_date & 65280) >> 8
+    upper_birth_date = (delta_birth_date & 65280) >> 8 # I forgot int_to_bytes exist, but leaving it in anyways
     lower_birth_date = delta_birth_date & 255
 
     #print("Delta birth date: " + str(delta_birth_date))
@@ -988,7 +988,158 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
     assert len(salt) == 16
     assert 0 < health_id < 10000000000 # leading zeros are an issue
 
-    # delete this comment and insert your code here
+    g = DH_params.g
+    N = DH_params.N
+
+    varprint( N, 'N' )
+    varprint( g, 'g' )
+    varprint( username, 'username' )
+    varprint( pw, 'pw' )
+    varprint( s, 's' )
+
+    # connect to the server
+    sock = create_socket( ip, port )
+    if sock is None:
+        return None
+
+    # send 'p'
+    count = send( sock, b'p' )
+    if count != 1:
+        return close_sock( sock )
+
+    # retrieve N and g
+    expected = base_bytes * 2
+    g_N = receive( sock, expected )
+    if len(g_N) != expected:
+        return close_sock( sock )
+
+    # check they match
+    if bytes_to_int(g_N[:expected>>1]) != g:
+        return close_sock( sock )
+
+    if bytes_to_int(g_N[expected>>1:]) != N:
+        return close_sock( sock )
+
+    varprint( g_N[:expected>>1], "g" )
+    varprint( g_N[expected>>1:], "N" )
+
+    # calculate k before conversions, as it might be more efficient
+    k = calc_u( g, N )      # same action as u!
+    varprint( k, 'k' )
+
+    # calculate x and v
+    x = calc_x( s, secret )
+    v = calc_A( g, N, x )   # same action as A!
+
+    varprint( x, 'x' )
+    varprint( v, 'v' )
+
+    # generate a via rejection sampling
+    a = randbits( base_bits )
+    while a >= N:
+        a = randbits( base_bits )
+    varprint( a, 'a' )
+
+    # calculate A
+    A = RSA_key.encrypt(calc_A( g, N, a ))
+    A_bytes = int_to_bytes( A, base_bytes )
+    varprint( A, 'A' )
+
+    # send A, username
+    u_enc = uuid.encode('utf-8')
+    u_len = int_to_bytes( len(u_enc), 1 )
+
+    data = A_bytes + u_len + u_enc
+    count = send( sock, data )
+    if count != len(data):
+        return close_sock( sock )
+
+    # get s, B
+    expected = salt_bytes + base_bytes
+    s_B = receive( sock, expected )
+    if len(s_B) != expected:
+        return close_sock( sock )
+    varprint( s_B, None )
+
+    if s != s_B[:salt_bytes]:
+        return close_sock( sock )
+
+    B = bytes_to_int( s_B[salt_bytes:] )
+    varprint( B, 'B' )
+
+    # compute u
+    u = calc_u( A_bytes, s_B[salt_bytes:] )
+    varprint( u, 'u' )
+
+    # compute K_client
+    K_client = calc_K_client( N, B, k, v, a, u, x )
+    varprint( K_client, 'K_client' )
+
+    # get bits
+    bits = receive( sock, 1 )
+    if len(bits) != 1:
+        return close_sock( sock )
+
+    # find Y
+    Y = find_Y( K_client, bits )
+    varprint( bytes_to_int(Y), 'Y' )
+
+    # send Y
+    count = send( sock, Y )
+    if count != len(Y):
+        return close_sock( sock )
+
+    # receive M1_server
+    M1 = receive( sock, hash_bytes )
+    if len(M1) != hash_bytes:
+        return close_sock( sock )
+
+    varprint( M1, 'M1' )
+
+    # all done with the connection
+    close_sock( sock )
+
+    # doesn't match what we computed? FAILURE
+    if M1 != calc_M1( A_bytes, K_client, Y ):
+        return None
+
+    #send client data
+    epoch_vax = date(2006,6,11)
+    epoch_birth = date(1880,1,1)
+
+    last_vax_days = (vax_date - epoch_vax).days
+    if(last_vax_days > 65535):
+        last_vax_days = 65535
+
+    delta_birth_date = (birthdate - epoch_birth).days
+    if(delta_birth_date > 65535):
+        delta_birth_date = 65535
+
+    client_data = bytearray()
+    client_data.extend(int_to_bytes(health_id, 5)) #OHN ID
+    client_data.extend(bytearray(3)) # zero bytes
+    client_data.extend(int_to_bytes(delta_birth_date, 2)) # birthdate as days since 1880 Jan 1
+    client_data.extend(bytearray(4)) # zero bytes
+    client_data.extend(int_to_bytes(last_vax_days, 2))
+
+    client_data_enc = encrypt_data(client_data, K_client[0:32], K_client[32:])
+
+
+    # receive QR code
+    qr_len = 319
+    qrcode = receive(sock, qr_len)
+    if(len(qrcode) != qr_len):
+        return None
+
+    passport = decrypt_data(qrcode, K_client[0:32], K_client[32:])
+
+    if(passport):
+        print("Client: Protocol successful.")
+        return (a, K_client, passport)  # both are ints
+    else:
+        print("Client: Passport not valid.")
+        return (a, K_client, passport)  # both are ints
+    ### END
 
 def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
         key_hash:bytes, key_enc:bytes, bits:int, registered:dict, vax_database:dict \
@@ -1022,7 +1173,114 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
     assert len(registered) > 0
     assert len(vax_database) > 0
 
-    # delete this comment and insert your code here
+    varprint(N, 'N', "Server")
+    varprint(g, 'g', "Server")
+
+    g = DH_params.g
+    N = DH_params.N
+
+    k = calc_u(g, N)  # same thing as u!
+    varprint(k, 'k', "Server")
+
+    # send g and N
+    data = g + N
+    count = send(sock, data)
+    if count != len(data):
+        return close_sock(sock)
+
+    # get A
+    A_bytes = receive(sock, base_bytes)
+    if len(A_bytes) != base_bytes:
+        return close_sock(sock)
+    A = RSA_key.decrypt(bytes_to_int(A_bytes))
+    varprint(A_bytes, None, "Server")
+    varprint(A, 'A', "Server")
+
+    # get username
+    data = receive(sock, 1)
+    if len(data) != 1:
+        return close_sock(sock)
+    count = bytes_to_int(data)
+    varprint(count, 'username_length', "Server")
+
+    u_enc = receive(sock, count)
+    if len(u_enc) != count:
+        return close_sock(sock)
+    varprint(u_enc, 'u_enc', "Server")
+
+    try:
+        username = u_enc.decode('utf-8')
+    except:
+        return close_sock(sock)
+
+    varprint(username, 'username', "Server")
+
+    g, N = map(b2i, [g, N])
+
+    # retrieve s, v, if possible
+    if username in database:
+        s, v = database[username]
+    else:
+        return close_sock(sock)
+
+    # generate b via rejection sampling
+    b = randbits(base_bits)
+    while b >= N:
+        b = randbits(base_bits)
+    varprint(b, 'b', "Server")
+
+    # calculate B
+    B = calc_B(g, N, b, k, v)
+    B_bytes = int_to_bytes(B, base_bytes)
+    varprint(B, 'B', "Server")
+
+    # send s,B
+    data = s + B_bytes
+    count = send(sock, data)
+    if count != len(data):
+        return close_sock(sock)
+
+    # compute u
+    u = calc_u(A_bytes, B_bytes)
+    varprint(u, 'u', "Server")
+
+    # compute K_server
+    K_server = calc_K_server(N, A_bytes, b, v, u)
+    varprint(K_server, 'K_server', "Server")
+
+    # send bits
+    count = send(sock, bits.to_bytes(1, 'big'))
+    if count != 1:
+        return close_sock(sock)
+
+    # receive Y
+    Y = receive(sock, base_bytes)
+    if len(Y) != base_bytes:
+        return close_sock(sock)
+    varprint(Y, 'Y', "Server")
+
+    # check Y
+    base = bits >> 3  # copy-paste code is worth the increased risk of breakage
+    mask = ~((1 << (8 - (bits & 7))) - 1)
+
+    hashVal = blake2b_256(i2b(K_server, base_bytes) + Y)
+    if (hashVal[:base] != bytes(base)) or ((hashVal[base] & mask) != 0):
+        return close_sock(sock)
+
+    # compute M1
+    M1 = calc_M1(A, K_server, Y)
+    varprint(bytes_to_int(M1), 'M1', "Server")
+
+    # send M1. Defer error checking until after the socket's closed
+    count = send(sock, M1)
+    close_sock(sock)
+    if count != len(M1):
+        return None
+    else:
+        print("Server: Protocol successful.")
+        return (username, b, K_server)
+    ### END
+
 
 ##### MAIN
 
