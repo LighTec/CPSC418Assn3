@@ -51,6 +51,13 @@ from typing import Callable, Iterator, Mapping, Optional, Union
 epoch_vax = date(2006, 6, 11)
 epoch_birth = date(1880, 1, 1)
 
+base_bytes = 64
+base_bits  = base_bytes << 3 # same as multiplying by 8
+hash_bytes = 32
+hash_bits  = hash_bytes << 3
+salt_bytes = 16
+salt_bits  = salt_bytes << 3
+
 # bad news: all their external imports aren't imported into this namespace, 
 #  so you'll need to reimport. Do so here.
 
@@ -406,7 +413,6 @@ def pad_to_136(input: bytes) -> bytes:
         output = bytearray(input)
         output.extend(to_pad)
         return bytes(output)
-
 
 def encode_name( given_name:str, surname:str, target:int=92 ) -> bytes:
     """Compact a person's name into a bytes sequence. See the 
@@ -839,17 +845,10 @@ def verify_passport( passport:bytes, key_enc:bytes, RSA_key:RSA_key, key_hash:Op
     passport_data = passport[0:159]
     passport_signature = passport[159:]
 
-    #print("Length of Data: " + str(len(passport_data)))
-    #print("Length of Signature: " + str(len(passport_signature)))
-
-    #print("Verifying passport...")
     # check the rsa key can decrypt key_enc to the passport
     verified = RSA_key.verify(passport_data, passport_signature)
     if(not verified):
-        #print("Passport verified as incorrect!")
         return None
-    #else:
-        #print("Passport verified as correct...")
 
     
     # take the (outer tag) mac off of the passport_data
@@ -886,56 +885,35 @@ def verify_passport( passport:bytes, key_enc:bytes, RSA_key:RSA_key, key_hash:Op
         plaintext.extend(plaintext_piece)
         tag.extend(tag_piece)
 
-    #print("Plaintext: " + str(plaintext))
-    #print("Nonce: " + str(nonce))
-    #print("Tag: " + str(tag))
-    #print("keyhash: " + str(key_hash))
-
     # make new mac by just hashing (not KMAC) nonce||plaintext||(inner)tag
     to_hash = b''.join([nonce, plaintext, tag])
     new_mac = hash(to_hash, 31)
 
     # compare mac from input with new mac
     if(new_mac != ciphertext_mac):
-        #print("ciphertext mac not equal to calculated mac!")
         return None
-    #else:
-        #print("macs agree...")
 
     if(key_hash):
-        #print("Key hash given.")
         data_1 = b''.join([nonce, plaintext])
         custom = bytes("OH SARS SECOND VERIFY", "UTF-8")
         new_tag = pseudoKMAC(key_hash, data_1, 16, custom)
-        #print("New tag: " + str(new_tag))
         if(new_tag != tag):
-            #print("Tags don't match!")
             return None
-        #else:
-            #print("Tags match...")
 
     # split data from plaintext & return
     vax_count = (plaintext[0] & 240) >> 4
 
     upper_vax_weeks = (plaintext[0] & 15) << 8
     lower_vax_weeks = plaintext[1]
-    #print("plaintext[0]: " + str(plaintext[0]))
-    #print("plaintext[1]: " + str(plaintext[1]))
     vax_weeks = lower_vax_weeks + upper_vax_weeks
-    
-    #print("vax weeks: " + str(vax_weeks))
 
     if(vax_weeks == 4095):
         weeks_since_vax = vax_weeks
     else:
         weeks_since_vax_origin = ((date.today()) - epoch_vax).days // 7
-
         weeks_since_vax = weeks_since_vax_origin - vax_weeks
 
-    #print("Adjusted vax weeks: " + str(weeks_since_vax))
-
     birth_days = bytes_to_int(bytes(plaintext[2:4]))
-
     birthdate = epoch_birth + timedelta(days=birth_days)
 
     surname_index = plaintext[4]
@@ -961,10 +939,7 @@ def verify_passport( passport:bytes, key_enc:bytes, RSA_key:RSA_key, key_hash:Op
 
     output = (str(given_name, "UTF-8"), str(surname, "UTF-8"), birthdate, vax_count, weeks_since_vax)
 
-    #print("Returning data: " + str(output))
-
     return output
-
 
 
 
@@ -1004,19 +979,6 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
     g = DH_params.g
     N = DH_params.N
 
-    base_bytes = 64
-    base_bits  = base_bytes << 3 # same as multiplying by 8
-    hash_bytes = 32
-    hash_bits  = hash_bytes << 3
-    salt_bytes = 16
-    salt_bits  = salt_bytes << 3
-
-    varprint( N, 'N' )
-    varprint( g, 'g' )
-    varprint( uuid, 'username' )
-    varprint( secret, 'pw' )
-    varprint( salt, 's' )
-
     # connect to the server
     sock = create_socket( ip, port )
     if sock is None:
@@ -1028,7 +990,7 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
         return close_sock( sock )
 
     # retrieve N and g
-    expected = base_bits * 2
+    expected = DH_params.bytes * 2
     g_N = receive( sock, expected )
     if len(g_N) != expected:
         return close_sock( sock )
@@ -1040,69 +1002,55 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
     if bytes_to_int(g_N[expected>>1:]) != N:
         return close_sock( sock )
 
-    varprint( g_N[:expected>>1], "g" )
-    varprint( g_N[expected>>1:], "N" )
-
     # calculate k before conversions, as it might be more efficient
     k = calc_u( g, N )      # same action as u!
-    varprint( k, 'k' )
 
     # calculate x and v
     x = calc_x( salt, secret )
     v = calc_A( g, N, x )   # same action as A!
-
-    varprint( x, 'x' )
-    varprint( v, 'v' )
-
     # generate a via rejection sampling
     a = randbits( base_bits )
     while a >= N:
         a = randbits( base_bits )
-    varprint( a, 'a' )
 
     # calculate A
     A = RSA_key.encrypt(calc_A( g, N, a ))
-    A_bytes = int_to_bytes( A, base_bytes )
-    varprint( A, 'A' )
+    A_bytes = int_to_bytes( A, RSA_key.bytes )
 
     # send A, username
     u_enc = uuid.encode('utf-8')
     u_len = int_to_bytes( len(u_enc), 1 )
 
     data = A_bytes + u_len + u_enc
+
     count = send( sock, data )
     if count != len(data):
         return close_sock( sock )
 
     # get s, B
-    expected = salt_bytes + base_bytes
+    expected = salt_bytes + DH_params.bytes
     s_B = receive( sock, expected )
+
     if len(s_B) != expected:
         return close_sock( sock )
-    varprint( s_B, None )
 
     if salt != s_B[:salt_bytes]:
         return close_sock( sock )
 
     B = bytes_to_int( s_B[salt_bytes:] )
-    varprint( B, 'B' )
 
     # compute u
     u = calc_u( A_bytes, s_B[salt_bytes:] )
-    varprint( u, 'u' )
 
     # compute K_client
     K_client = calc_K_client( N, B, k, v, a, u, x )
-    varprint( K_client, 'K_client' )
 
     # get bits
     bits = receive( sock, 1 )
     if len(bits) != 1:
         return close_sock( sock )
-
     # find Y
-    Y = find_Y( K_client, bits )
-    varprint( bytes_to_int(Y), 'Y' )
+    Y = find_Y(K_client, bits)
 
     # send Y
     count = send( sock, Y )
@@ -1110,18 +1058,13 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
         return close_sock( sock )
 
     # receive M1_server
-    M1 = receive( sock, hash_bytes )
-    if len(M1) != hash_bytes:
+    M1 = receive( sock, base_bytes )
+    if len(M1) != DH_params.bytes:
         return close_sock( sock )
 
-    varprint( M1, 'M1' )
-
-    # all done with the connection
-    close_sock( sock )
-
-    # doesn't match what we computed? FAILURE
-    if M1 != calc_M1( A_bytes, K_client, Y ):
-        return None
+    # doesn't match what we computed?
+    if M1 != calc_M1(A_bytes, K_client, Y):
+        return close_sock( sock )
 
     #send client data
     epoch_vax = date(2006,6,11)
@@ -1141,8 +1084,6 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
     client_data.extend(int_to_bytes(delta_birth_date, 2)) # birthdate as days since 1880 Jan 1
     client_data.extend(bytearray(4)) # zero bytes
     client_data.extend(int_to_bytes(last_vax_days, 2))
-
-    # -----------------------encryption under construstion
 
     # making (Nrsa||e)
     n_b = union_to_bytes(RSA_key.N)
@@ -1171,21 +1112,21 @@ def request_passport( ip:str, port:int, uuid:str, secret:str, salt:bytes, \
 
         client_data_enc = b''.join([client_data_enc, encrypted_data_i])
 
-    # -----------------------construction ends
     # receive QR code
-    qr_len = 319
+    qr_len = 323
     qrcode = receive(sock, qr_len)
     if(len(qrcode) != qr_len):
-        return None
+        return close_sock( sock )
 
     passport = decrypt_data(qrcode, K_client[0:32], K_client[32:])
 
     if(passport):
         print("Client: Protocol successful.")
+        close_sock(sock)
         return (a, K_client, passport)  # both are ints
     else:
         print("Client: Passport not valid.")
-        return None
+        return close_sock( sock )
     ### END
 
 def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
@@ -1220,55 +1161,38 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
     assert len(registered) > 0
     assert len(vax_database) > 0
 
-    base_bytes = 64
-    base_bits  = base_bytes << 3 # same as multiplying by 8
-    hash_bytes = 32
-    hash_bits  = hash_bytes << 3
-    salt_bytes = 16
-    salt_bits  = salt_bytes << 3
-
-    g, N = map(lambda x: i2b(x, base_bytes), [DH_params.g, DH_params.N])
-
-    varprint(N, 'N', "Server")
-    varprint(g, 'g', "Server")
+    g = DH_params.g
+    N = DH_params.N
 
     k = calc_u(g, N)  # same thing as u!
-    varprint(k, 'k', "Server")
 
     # send g and N
-    data = union_to_bytes(g) + union_to_bytes(N)
+    data = int_to_bytes(g, DH_params.bytes) + int_to_bytes(N, DH_params.bytes)
     count = send(sock, data)
-    if count != len(data):
+    if count != DH_params.bytes * 2:
         return close_sock(sock)
 
     # get A
-    A_bytes = receive(sock, base_bytes)
-    if len(A_bytes) != base_bytes:
+    A_bytes = receive(sock, RSA_key.bytes)
+
+    if len(A_bytes) != RSA_key.bytes:
         return close_sock(sock)
     A = RSA_key.decrypt(bytes_to_int(A_bytes))
-    varprint(A_bytes, None, "Server")
-    varprint(A, 'A', "Server")
 
     # get username
     data = receive(sock, 1)
     if len(data) != 1:
         return close_sock(sock)
     count = bytes_to_int(data)
-    varprint(count, 'username_length', "Server")
 
     u_enc = receive(sock, count)
     if len(u_enc) != count:
         return close_sock(sock)
-    varprint(u_enc, 'u_enc', "Server")
 
     try:
         username = u_enc.decode('utf-8')
     except:
         return close_sock(sock)
-
-    varprint(username, 'username', "Server")
-
-    g, N = map(b2i, [g, N])
 
     # retrieve s, v, if possible
     if username in registered:
@@ -1277,29 +1201,27 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
         return close_sock(sock)
 
     # generate b via rejection sampling
-    b = randbits(base_bits)
+    b = randbits(DH_params.bits)
+
     while b >= N:
-        b = randbits(base_bits)
-    varprint(b, 'b', "Server")
+        b = randbits(DH_params.bits)
 
     # calculate B
     B = calc_B(g, N, b, k, v)
-    B_bytes = int_to_bytes(B, base_bytes)
-    varprint(B, 'B', "Server")
+    B_bytes = int_to_bytes(B, DH_params.bytes)
 
     # send s,B
     data = s + B_bytes
+
     count = send(sock, data)
     if count != len(data):
         return close_sock(sock)
 
     # compute u
     u = calc_u(A_bytes, B_bytes)
-    varprint(u, 'u', "Server")
 
     # compute K_server
     K_server = calc_K_server(N, A_bytes, b, v, u)
-    varprint(K_server, 'K_server', "Server")
 
     # send bits
     count = send(sock, bits.to_bytes(1, 'big'))
@@ -1308,32 +1230,29 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
 
     # receive Y
     Y = receive(sock, base_bytes)
-    if len(Y) != base_bytes:
+    if len(Y) != DH_params.bytes:
         return close_sock(sock)
-    varprint(Y, 'Y', "Server")
 
     # check Y
     base = bits >> 3  # copy-paste code is worth the increased risk of breakage
     mask = ~((1 << (8 - (bits & 7))) - 1)
 
+    # This part is not working, and I cannot tell why
     hashVal = blake2b_256(i2b(K_server, base_bytes) + Y)
     if (hashVal[:base] != bytes(base)) or ((hashVal[base] & mask) != 0):
         return close_sock(sock)
 
     # compute M1
     M1 = calc_M1(A, K_server, Y)
-    varprint(bytes_to_int(M1), 'M1', "Server")
 
-    # send M1. Defer error checking until after the socket's closed
+    # send M1
     count = send(sock, M1)
-
-    close_sock(sock)
     if count != len(M1):
         return close_sock(sock)
 
     client_data_len = 48
 
-    client_data_enc = sock.recv(sock, client_data_len)
+    client_data_enc = receive(sock, client_data_len)
     if len(client_data_enc) != client_data_len:
         return close_sock(sock)
 
@@ -1381,7 +1300,6 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
         vax_data = OHN_data[3:]
 
         # find newest vax record
-
         for vax in vax_data:
             vax_count += 1
             if not latest_vax:
@@ -1401,13 +1319,12 @@ def retrieve_passport( sock:socket.socket, DH_params:object, RSA_key:object, \
 
     qr_data = bytes(qr_data)
 
-    passport = bytes()
-    qr_data = bytes()
-    
     qr_data_enc = encrypt_data(qr_data, K_server[0:32], K_server[32:])
 
-    count = send(sock, qr_data_enc)
-    if count != len(qr_data_enc):
+    qr_out = int_to_bytes(len(qr_data_enc), 4) + qr_data_enc
+
+    count = send(sock, qr_out)
+    if count != len(qr_out):
         return close_sock(sock)
     else:
         print("Server: Protocol successful.")

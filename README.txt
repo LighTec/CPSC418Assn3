@@ -21,11 +21,16 @@ Implemented:
 - create_passport()
 - verify_passport()
 
-Not Implemented / Partially Implemented:
+Partially Implemented:
 - request_passport()
+	    - Cannot generate a valid Y, unsure why.
+	    - Rest of the code should be OK, but cannot verify.
 - retrieve_passport()
+	    - Unable to check if Y is correct, keeps stating Y is not valid even though after computing M1
+	        and the gradescope client declare it as valid.
+	    - QR data generation not sending data, but appears to be generating the data correctly.
 
 Known Bugs:
-	TODO
+- See Partially Implemented
 
 I worked with (Kell/Alexandria) on my answers.
